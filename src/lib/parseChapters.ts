@@ -50,42 +50,62 @@ function parseWithNewlines(blocks: string[]): Chapter[] {
 // where "Title Phrase" starts with uppercase, has no period inside, ≤ 10 words.
 
 function detectMergedSections(text: string): Chapter[] {
-  // Detect "Short Title: Subtitle" patterns where:
-  // - lookbehind: start of string, period/!? (0-2 spaces), or newline
-  // - title chars: allow periods so "ChatGPT 2.0", "GPT-4.5" work
-  const re =
+  // Pattern A: "Title: Subtitle" — lookbehind allows start, .!? or newline before title
+  const reColon =
     /(?:^|(?<=[.!?]\s{0,2})|(?<=\n))([A-ZÁÉÍÓÚÑÜ][^\n!?:]{3,100}):\s+(?=[A-ZÁÉÍÓÚÑÜ])/g;
 
-  // First pass: collect raw matches (position of title + position right after ": ")
-  const raw: { titleStart: number; afterColon: number }[] = [];
+  // Pattern B: Title Case phrase with NO colon, e.g.
+  //   "Síntesis Conclusiva"
+  //   "La Guerra de Chips y el Déficit Computacional Masivo"
+  // First word is Title Case; subsequent words are either Title Case or short
+  // lowercase connectors (≤4 chars: "de", "y", "el", "del", "por", "con", "para"…).
+  // Must appear right after sentence-end punctuation and immediately before uppercase.
+  const reTitle =
+    /(?<=[.!?])([A-ZÁÉÍÓÚÑÜ][a-záéíóúñü]+(?:\s+(?:[a-záéíóúñü]{1,4}|[A-ZÁÉÍÓÚÑÜ][a-záéíóúñü]+)){1,9})(?=[A-ZÁÉÍÓÚÑÜ])/g;
+
+  type Raw = { titleStart: number; afterColon: number; hasSubtitle: boolean };
+  const raw: Raw[] = [];
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
+
+  while ((m = reColon.exec(text)) !== null) {
     const wc = m[1].trim().split(/\s+/).length;
-    if (wc >= 2 && wc <= 12) {
-      raw.push({ titleStart: m.index, afterColon: m.index + m[0].length });
+    if (wc >= 2 && wc <= 12)
+      raw.push({ titleStart: m.index, afterColon: m.index + m[0].length, hasSubtitle: true });
+  }
+
+  while ((m = reTitle.exec(text)) !== null) {
+    const words = m[1].trim().split(/\s+/);
+    const titleCaseCount = words.filter(w => /^[A-ZÁÉÍÓÚÑÜ][a-záéíóúñü]+$/.test(w)).length;
+    // Require at least 2 Title Case words so "La de" style garbage is rejected
+    if (words.length >= 2 && words.length <= 10 && titleCaseCount >= 2) {
+      const pos = m.index;
+      const bodyStart = m.index + m[0].length;
+      if (!raw.some(r => Math.abs(r.titleStart - pos) < 5))
+        raw.push({ titleStart: pos, afterColon: bodyStart, hasSubtitle: false });
     }
   }
 
+  raw.sort((a, b) => a.titleStart - b.titleStart);
   if (raw.length < 2) return [{ title: "Contenido", content: text.trim() }];
 
-  // Second pass: for each section, find where the FULL heading ends and body begins.
-  // In merged text the subtitle ends at the first [lowercase][UPPERCASE] transition
-  // with NO space between them (e.g. "ContextualEl", "PíxelesEl").
-  // Inside the subtitle all capitalized words ARE preceded by a space, so this
-  // transition only occurs at the heading→body boundary.
+  // For colon-style headings, find where the subtitle ends and body begins.
   function findBodyStart(from: number, cap: number): number {
-    const br = /[a-záéíóúñü][A-ZÁÉÍÓÚÑÜ]/g;
+    const br = /(?<!\s)[^A-ZÁÉÍÓÚÑÜ\s][A-ZÁÉÍÓÚÑÜ]/g;
     br.lastIndex = from;
     const bm = br.exec(text);
-    if (bm && bm.index < cap) return bm.index + 1; // body starts at the uppercase letter
-    return from; // no boundary found → body starts right after ": "
+    if (bm && bm.index < cap) return bm.index + 1;
+    return from;
   }
 
   const sections: { titleStart: number; fullTitle: string; bodyStart: number }[] = [];
   for (let i = 0; i < raw.length; i++) {
     const cap = i + 1 < raw.length ? raw[i + 1].titleStart : raw[i].afterColon + 400;
-    const bodyStart = findBodyStart(raw[i].afterColon, cap);
-    // Full heading = everything from the section start up to where the body begins
+    let bodyStart: number;
+    if (raw[i].hasSubtitle) {
+      bodyStart = findBodyStart(raw[i].afterColon, cap);
+    } else {
+      bodyStart = raw[i].afterColon; // no-colon: body starts right after title
+    }
     const fullTitle = text.slice(raw[i].titleStart, bodyStart).trim();
     sections.push({ titleStart: raw[i].titleStart, fullTitle, bodyStart });
   }
