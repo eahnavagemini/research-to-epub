@@ -12,17 +12,31 @@ function looksLikeHeading(line: string): boolean {
   return true;
 }
 
+// When text arrives as one big blob (no newlines), split at embedded section
+// boundaries: a period/colon followed immediately by an uppercase letter that
+// starts a multi-word phrase also ending without sentence punctuation.
+// e.g.  "...automatizados.Estrangulamiento del Hardware..." → split before "Estrangulamiento"
+function splitMergedBlocks(text: string): string[] {
+  // Insert a newline before uppercase words that follow a period/colon with no space
+  // Only do this when the sequence looks like SectionTitle (≥2 words, short line)
+  const spaced = text.replace(/([.!?:])([A-ZÁÉÍÓÚÑÜ][a-záéíóúñü])/g, "$1\n$2");
+  return spaced.split(/\n/).map((s) => s.trim()).filter(Boolean);
+}
+
 export function parseChapters(text: string): Chapter[] {
   if (!text.trim()) return [];
 
   const normalised = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
-  // Try double newlines first; fall back to single newlines if text is one big block
-  const rawSplit = normalised.split(/\n{2,}/);
-  const splitByDouble = rawSplit.length > 2;
-  const blocks = (splitByDouble ? rawSplit : normalised.split(/\n/))
-    .map((b) => b.trim())
-    .filter(Boolean);
+  // Priority 1: double newlines
+  const byDouble = normalised.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+  // Priority 2: single newlines
+  const bySingle = normalised.split(/\n/).map((b) => b.trim()).filter(Boolean);
+  // Priority 3: detect merged text with no newlines at all
+  const blocks =
+    byDouble.length > 2 ? byDouble :
+    bySingle.length > 2 ? bySingle :
+    splitMergedBlocks(normalised);
 
   if (blocks.length === 0) return [];
 
