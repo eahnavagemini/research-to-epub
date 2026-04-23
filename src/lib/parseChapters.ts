@@ -50,11 +50,12 @@ function parseWithNewlines(blocks: string[]): Chapter[] {
 // where "Title Phrase" starts with uppercase, has no period inside, ≤ 10 words.
 
 function detectMergedSections(text: string): Chapter[] {
-  // Match: [Title]: [Uppercase continuation]
-  // Allow periods inside title so "ChatGPT 2.0", "GPT-4.5" etc. are captured correctly.
-  // Exclude only newlines, ? ! and : from title chars.
+  // Lookbehind: start of string, OR sentence-ending punctuation (.!?) with 0-2 spaces, OR newline.
+  // Title char class [^\n!?:] allows periods inside (for "ChatGPT 2.0", "GPT-4.5", etc.)
+  // so the period in the lookbehind (.!?) only fires on sentence-ending dots before the title,
+  // not on dots inside version numbers — those never appear at the start of a title.
   const re =
-    /(?:^|(?<=[!?]\s{0,2})|(?<=\n))([A-ZÁÉÍÓÚÑÜ][^\n!?:]{3,100}):\s+(?=[A-ZÁÉÍÓÚÑÜ])/g;
+    /(?:^|(?<=[.!?]\s{0,2})|(?<=\n))([A-ZÁÉÍÓÚÑÜ][^\n!?:]{3,100}):\s+(?=[A-ZÁÉÍÓÚÑÜ])/g;
 
   const sections: { titleStart: number; title: string; contentStart: number }[] = [];
   let m: RegExpExecArray | null;
