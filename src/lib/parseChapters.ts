@@ -50,41 +50,56 @@ function parseWithNewlines(blocks: string[]): Chapter[] {
 // where "Title Phrase" starts with uppercase, has no period inside, ≤ 10 words.
 
 function detectMergedSections(text: string): Chapter[] {
-  // Lookbehind: start of string, OR sentence-ending punctuation (.!?) with 0-2 spaces, OR newline.
-  // Title char class [^\n!?:] allows periods inside (for "ChatGPT 2.0", "GPT-4.5", etc.)
-  // so the period in the lookbehind (.!?) only fires on sentence-ending dots before the title,
-  // not on dots inside version numbers — those never appear at the start of a title.
+  // Detect "Short Title: Subtitle" patterns where:
+  // - lookbehind: start of string, period/!? (0-2 spaces), or newline
+  // - title chars: allow periods so "ChatGPT 2.0", "GPT-4.5" work
   const re =
     /(?:^|(?<=[.!?]\s{0,2})|(?<=\n))([A-ZÁÉÍÓÚÑÜ][^\n!?:]{3,100}):\s+(?=[A-ZÁÉÍÓÚÑÜ])/g;
 
-  const sections: { titleStart: number; title: string; contentStart: number }[] = [];
+  // First pass: collect raw matches (position of title + position right after ": ")
+  const raw: { titleStart: number; afterColon: number }[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    const title = m[1].trim();
-    const wordCount = title.split(/\s+/).length;
-    if (wordCount >= 2 && wordCount <= 12) {
-      sections.push({ titleStart: m.index, title, contentStart: m.index + m[0].length });
+    const wc = m[1].trim().split(/\s+/).length;
+    if (wc >= 2 && wc <= 12) {
+      raw.push({ titleStart: m.index, afterColon: m.index + m[0].length });
     }
   }
 
-  if (sections.length < 2) {
-    return [{ title: "Contenido", content: text.trim() }];
+  if (raw.length < 2) return [{ title: "Contenido", content: text.trim() }];
+
+  // Second pass: for each section, find where the FULL heading ends and body begins.
+  // In merged text the subtitle ends at the first [lowercase][UPPERCASE] transition
+  // with NO space between them (e.g. "ContextualEl", "PíxelesEl").
+  // Inside the subtitle all capitalized words ARE preceded by a space, so this
+  // transition only occurs at the heading→body boundary.
+  function findBodyStart(from: number, cap: number): number {
+    const br = /[a-záéíóúñü][A-ZÁÉÍÓÚÑÜ]/g;
+    br.lastIndex = from;
+    const bm = br.exec(text);
+    if (bm && bm.index < cap) return bm.index + 1; // body starts at the uppercase letter
+    return from; // no boundary found → body starts right after ": "
+  }
+
+  const sections: { titleStart: number; fullTitle: string; bodyStart: number }[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const cap = i + 1 < raw.length ? raw[i + 1].titleStart : raw[i].afterColon + 400;
+    const bodyStart = findBodyStart(raw[i].afterColon, cap);
+    // Full heading = everything from the section start up to where the body begins
+    const fullTitle = text.slice(raw[i].titleStart, bodyStart).trim();
+    sections.push({ titleStart: raw[i].titleStart, fullTitle, bodyStart });
   }
 
   const chapters: Chapter[] = [];
-
-  // Text before the first section → Introducción
   const prelude = text.slice(0, sections[0].titleStart).trim();
-  if (prelude.length > 80) {
-    chapters.push({ title: "Introducción", content: prelude });
-  }
+  if (prelude.length > 80) chapters.push({ title: "Introducción", content: prelude });
 
   for (let i = 0; i < sections.length; i++) {
-    const start = sections[i].contentStart;
+    const start = sections[i].bodyStart;
     const end = i + 1 < sections.length ? sections[i + 1].titleStart : text.length;
     const content = text.slice(start, end).trim();
     if (content.length > 0) {
-      chapters.push({ title: sections[i].title, content });
+      chapters.push({ title: sections[i].fullTitle, content });
     }
   }
 
