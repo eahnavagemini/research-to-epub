@@ -3,13 +3,10 @@ export interface Chapter {
   content: string; // raw plain-text content
 }
 
-// Heuristic: a line is a heading if it's ≤120 chars, doesn't end in period/comma/semicolon,
-// and is followed (after whitespace) by a non-empty paragraph.
 function looksLikeHeading(line: string): boolean {
   const trimmed = line.trim();
   if (trimmed.length === 0 || trimmed.length > 120) return false;
   if (/[.,;]$/.test(trimmed)) return false;
-  // Must have at least 2 words (avoid splitting on short sentence fragments)
   const words = trimmed.split(/\s+/);
   if (words.length < 2) return false;
   return true;
@@ -18,11 +15,14 @@ function looksLikeHeading(line: string): boolean {
 export function parseChapters(text: string): Chapter[] {
   if (!text.trim()) return [];
 
-  // Normalise line endings
   const normalised = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
-  // Split into blocks by double newline
-  const blocks = normalised.split(/\n{2,}/).map((b) => b.trim()).filter(Boolean);
+  // Try double newlines first; fall back to single newlines if text is one big block
+  const rawSplit = normalised.split(/\n{2,}/);
+  const splitByDouble = rawSplit.length > 2;
+  const blocks = (splitByDouble ? rawSplit : normalised.split(/\n/))
+    .map((b) => b.trim())
+    .filter(Boolean);
 
   if (blocks.length === 0) return [];
 

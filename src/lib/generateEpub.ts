@@ -1,4 +1,4 @@
-import { EPub } from "epub-gen-memory";
+import epub from "epub-gen-memory/bundle";
 import type { Chapter } from "./parseChapters";
 import { plainTextToKepubHtml } from "./toKepub";
 
@@ -49,18 +49,10 @@ export async function generateKepub(
     content: plainTextToKepubHtml(ch.content, i),
   }));
 
-  const options = {
-    title: meta.title,
-    author: meta.author,
-    lang: meta.language,
-    css: KOBO_CSS,
-    content: epubChapters,
-    version: 3,
-  };
-
-  const epub = new EPub(options, epubChapters);
-  await epub.render();
-  return epub.generateAsync({ type: "blob" }) as Promise<Blob>;
+  return epub(
+    { title: meta.title, author: meta.author, lang: meta.language, css: KOBO_CSS, version: 3 },
+    epubChapters
+  );
 }
 
 export function downloadKepub(blob: Blob, title: string): void {
